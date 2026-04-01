@@ -38,29 +38,32 @@ def smart_translate(text, translator):
         for placeholder, original in placeholders.items():
             result = result.replace(placeholder.strip(), original)
             result = result.replace(placeholder, original)
-        return result
+        return str(result)
     except:
-        return text
+        return str(text)
 
 # --- ARAYÜZ ---
 st.title("🚀 Shopify Ultimate Çeviri Paneli")
 
 st.sidebar.header("⚙️ Ayarlar")
-languages = {"İngilizce": "en", "Fransızca": "fr", "Almanca": "de", "Hollandaca": "nl", "Türkçe": "tr", "İspanyolca": "es"}
+languages = {"İngilizce": "en", "Fransızca": "fr", "Almanca": "de", "Hollandaca": "nl", "Türkçe": "tr"}
 target_lang_name = st.sidebar.selectbox("Hedef Dili Seçin:", list(languages.keys()))
 target_lang_code = languages[target_lang_name]
 
 st.sidebar.write("---")
-only_empty = st.sidebar.checkbox("Sadece boş olanları çevir", value=True, help="Eğer işlem yarıda kalırsa, dosyayı tekrar yükleyip bu seçeneği işaretleyin. Böylece çevrilmiş olanları atlar.")
+only_empty = st.sidebar.checkbox("Sadece boş olanları çevir", value=True)
 
 uploaded_file = st.file_uploader("Shopify CSV dosyasını yükleyin", type=["csv"])
 
 if uploaded_file:
-    # Bellek sorunu olmaması için dosyayı bir kez okuyalım
-    if 'main_df' not in st.session_state:
-        st.session_state.main_df = pd.read_csv(uploaded_file)
+    # Dosyayı her seferinde baştan okumaması için cache
+    df = pd.read_csv(uploaded_file)
     
-    df = st.session_state.main_df
+    # KRİTİK DÜZELTME: Sütun tipini zorla 'Object' (Metin) yapıyoruz
+    if 'Translated content' not in df.columns:
+        df['Translated content'] = ""
+    df['Translated content'] = df['Translated content'].astype(str)
+    
     total_rows = len(df)
     
     # Checklist
@@ -74,19 +77,13 @@ if uploaded_file:
             if st.sidebar.checkbox(f, value=is_on):
                 selected_fields.append(f)
 
-    # İstatistik
-    c1, c2 = st.columns(2)
-    c1.metric("Toplam Satır", total_rows)
-    c2.metric("Hedef Dil", target_lang_name)
+    st.metric("Toplam Satır", total_rows)
 
     if st.button(f"🔥 ÇEVİRİYİ BAŞLAT"):
         translator = GoogleTranslator(source='auto', target=target_lang_code)
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        if 'Translated content' not in df.columns:
-            df['Translated content'] = ""
-
         # ÇEVİRİ DÖNGÜSÜ
         for i, row in df.iterrows():
             field = str(row['Field'])
@@ -95,18 +92,20 @@ if uploaded_file:
 
             # Çevirme kriteri
             is_selected = field in selected_fields
-            is_empty = translated_val.strip() in ["", "nan", "None"]
+            # Hücre boş mu kontrolü
+            is_empty = translated_val.strip() in ["", "nan", "None", "NaN"]
             
             if is_selected:
                 if not only_empty or (only_empty and is_empty):
                     res = smart_translate(content, translator)
-                    df.at[i, 'Translated content'] = res
+                    # Buradaki atama hatasını gidermek için str() kullanıyoruz
+                    df.at[i, 'Translated content'] = str(res)
             
-            # İlerlemeyi her 10 satırda bir güncelle (Sistemi yormamak için)
-            if i % 10 == 0 or i == total_rows - 1:
+            # İlerlemeyi sadece 20 satırda bir güncelle (Donmayı önlemek için)
+            if i % 20 == 0 or i == total_rows - 1:
                 progress = (i + 1) / total_rows
                 progress_bar.progress(progress)
-                status_text.write(f"⏳ İşleniyor: {i+1} / {total_rows} - Son İşlem: {field}")
+                status_text.write(f"⏳ İşleniyor: {i+1} / {total_rows}")
 
         # Final Düzenleme
         df['Locale'] = target_lang_code
@@ -115,12 +114,12 @@ if uploaded_file:
         st.success("✅ İŞLEM TAMAMLANDI!")
         
         # Dosyayı Kaydet Butonu
-        st.write("### 📥 Dosyayı İndir")
+        st.write("---")
         csv_data = df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="💾 ÇEVRİLMİŞ CSV DOSYASINI KAYDET",
+            label="💾 ÇEVRİLMİŞ DOSYAYI BİLGİSAYARIMA KAYDET",
             data=csv_data,
-            file_name=f"shopify_{target_lang_code}_output.csv",
-            mime="text/csv",
+            file_name=f"shopify_{target_lang_code}_translated.csv",
+            mime="text/csv"
         )
         st.dataframe(df.head(100))
